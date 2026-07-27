@@ -1,0 +1,185 @@
+{
+  "info": {
+    "name": "Nysonian Mobile API",
+    "_postman_id": "b1f0a7c2-3d4e-4a5b-9c6d-7e8f9a0b1c2d",
+    "description": "Mobile API dispatcher (api/mobile.php) for the Nysonian ERP React Native app.\n\nAll calls go through ONE entry point:\n  {{baseUrl}}/api/mobile.php?action=<action>\n\nResponse shape: { status, message, data } for built-ins; auth/login and auth/otp/* echo a flat { status, message, ... } envelope.\n\nAuth is session-cookie based (PHPSESSID). Import this collection, keep the same Postman runtime so the cookie jar persists, and run the requests top-to-bottom: Login -> Send OTP -> Verify OTP.\n\nSet the collection variables (email, password, otp) under the collection's Variables tab.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://erp.nysonik.com", "type": "string" },
+    { "key": "email", "value": "you@nysonian.com", "type": "string" },
+    { "key": "password", "value": "your-password", "type": "string" },
+    { "key": "otp", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Auth / Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/x-www-form-urlencoded" },
+          { "key": "Accept", "value": "application/json" },
+          { "key": "X-Requested-With", "value": "XMLHttpRequest" }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            { "key": "email", "value": "{{email}}", "type": "text" },
+            { "key": "password", "value": "{{password}}", "type": "text" }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/mobile.php?action=auth/login",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "mobile.php"],
+          "query": [{ "key": "action", "value": "auth/login" }]
+        },
+        "description": "Step 1 — validate email + password. Returns { status, message, redirect }. The server sets the PHPSESSID cookie on success; Postman's cookie jar reuses it for later requests. HTTP is always 200 — check `status` in the body."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const json = pm.response.json();",
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('login succeeded', () => pm.expect(json.status).to.eql('success'));",
+              "if (json.unique_identifier) {",
+              "  pm.collectionVariables.set('uniqueIdentifier', json.unique_identifier);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "Auth / Send OTP",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/x-www-form-urlencoded" },
+          { "key": "Accept", "value": "application/json" },
+          { "key": "X-Requested-With", "value": "XMLHttpRequest" }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            { "key": "email", "value": "{{email}}", "type": "text" }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/mobile.php?action=auth/otp/send",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "mobile.php"],
+          "query": [{ "key": "action", "value": "auth/otp/send" }]
+        },
+        "description": "Step 2a — deliver a 6-digit OTP via Slack (if a slack_id exists) or email. Returns { status, channel, message }. On a logged-in/master session the body may also include `otp` for testing."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const json = pm.response.json();",
+              "pm.test('OTP sent', () => pm.expect(json.status).to.eql('success'));",
+              "if (json.otp) {",
+              "  pm.collectionVariables.set('otp', String(json.otp));",
+              "  console.log('OTP captured from response:', json.otp);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "Auth / Verify OTP",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/x-www-form-urlencoded" },
+          { "key": "Accept", "value": "application/json" },
+          { "key": "X-Requested-With", "value": "XMLHttpRequest" }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            { "key": "email", "value": "{{email}}", "type": "text" },
+            { "key": "otp", "value": "{{otp}}", "type": "text" }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/mobile.php?action=auth/otp/verify",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "mobile.php"],
+          "query": [{ "key": "action", "value": "auth/otp/verify" }]
+        },
+        "description": "Step 2b — verify the 6-digit code. Returns { status, message, user_id }. Set the {{otp}} collection variable to the code you received (Send OTP auto-fills it when the response exposes `otp`)."
+      },
+      "response": []
+    },
+    {
+      "name": "Ping",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/mobile.php?action=ping",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "mobile.php"],
+          "query": [{ "key": "action", "value": "ping" }]
+        },
+        "description": "Health check. Returns { status:'success', message:'pong', data:{ time } }."
+      },
+      "response": []
+    },
+    {
+      "name": "Capabilities",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/mobile.php?action=capabilities",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "mobile.php"],
+          "query": [{ "key": "action", "value": "capabilities" }]
+        },
+        "description": "Lists public/protected actions and the auth action map."
+      },
+      "response": []
+    },
+    {
+      "name": "Whoami (protected)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/mobile.php?action=whoami",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "mobile.php"],
+          "query": [{ "key": "action", "value": "whoami" }]
+        },
+        "description": "Protected — requires an authenticated session cookie. Returns 401 { status:'error', message:'Authentication required.' } when not logged in."
+      },
+      "response": []
+    },
+    {
+      "name": "Auth / Logout",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/mobile.php?action=auth/logout",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "mobile.php"],
+          "query": [{ "key": "action", "value": "auth/logout" }]
+        },
+        "description": "Destroys the session. Returns { status:'success', message:'Signed out.' }."
+      },
+      "response": []
+    }
+  ]
+}
