@@ -27,6 +27,9 @@ import {
   NotificationsData,
   OrganogramData,
   PayslipsData,
+  RosterData,
+  RosterDay,
+  RosterDayStatus,
   SupportData,
   TimeDocLogsData,
   LeaveApprovalDetail,
@@ -38,6 +41,7 @@ import {
   LifecycleApprovalDetail,
   LifecycleApprovalItem,
   ProbationDueItem,
+  ProbationApproverOption,
   ProbationReviewDetail,
   ProbationReviewItem,
 } from '@/types';
@@ -53,6 +57,65 @@ const REQUEST_TIMEOUT_MS = 25000;
 let activeSessionToken: string | null = null;
 let onUnauthorized: (() => void) | null = null;
 let unauthorizedNotifying = false;
+
+function normalizeRosterStatus(value: unknown): RosterDayStatus {
+  const s = String(value ?? '').toLowerCase();
+  if (s === 'off' || s === 'wfh') return s;
+  return 'working';
+}
+
+function normalizeRosterDay(raw: any, fallbackDate = ''): RosterDay {
+  const status = normalizeRosterStatus(raw?.status);
+  const statusLabel =
+    status === 'off' ? 'Weekly Off' : status === 'wfh' ? 'Work From Home' : 'Working';
+  return {
+    date: String(raw?.date ?? fallbackDate),
+    label: String(raw?.label ?? raw?.date ?? fallbackDate),
+    weekday: Number(raw?.weekday ?? 0),
+    weekdayLabel: String(raw?.weekdayLabel ?? ''),
+    status,
+    statusLabel: String(raw?.statusLabel ?? statusLabel),
+    inMonth: raw?.inMonth == null ? undefined : Boolean(raw.inMonth),
+  };
+}
+
+function defaultRosterDay(offsetDays: number): RosterDay {
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  d.setDate(d.getDate() + offsetDays);
+  const iso = d.toISOString().slice(0, 10);
+  return {
+    date: iso,
+    label: d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }),
+    weekday: ((d.getDay() + 6) % 7) + 1,
+    weekdayLabel: d.toLocaleDateString(undefined, { weekday: 'long' }),
+    status: 'working',
+    statusLabel: 'Working',
+  };
+}
+
+function normalizeRosterData(raw: any): RosterData | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const src = raw.days ? raw : raw.data && typeof raw.data === 'object' ? raw.data : null;
+  if (!src || typeof src !== 'object') return null;
+
+  const year = Number(src.year ?? new Date().getFullYear());
+  const month = Number(src.month ?? new Date().getMonth() + 1);
+  const days = Array.isArray(src.days)
+    ? src.days.map((day: any) => normalizeRosterDay(day))
+    : [];
+
+  return {
+    year,
+    month,
+    monthLabel: String(src.monthLabel ?? ''),
+    startDate: String(src.startDate ?? ''),
+    endDate: String(src.endDate ?? ''),
+    today: normalizeRosterDay(src.today, defaultRosterDay(0).date),
+    tomorrow: normalizeRosterDay(src.tomorrow, defaultRosterDay(1).date),
+    days,
+  };
+}
 
 /** Set by AuthContext after login/restore; included on every API request. */
 export function setApiSessionToken(token: string | null) {
@@ -195,6 +258,10 @@ function normalizeDashboard(raw: any): DashboardData | null {
     pendingPolicies: Array.isArray(src.pendingPolicies) ? src.pendingPolicies : [],
     missingFields: Array.isArray(src.missingFields) ? src.missingFields : [],
     logs: Array.isArray(src.logs) ? src.logs : [],
+    roster: {
+      today: normalizeRosterDay(src.roster?.today, defaultRosterDay(0).date),
+      tomorrow: normalizeRosterDay(src.roster?.tomorrow, defaultRosterDay(1).date),
+    },
     pendingOfferLetterCount: Number(src.pendingOfferLetterCount ?? src.pending_offer_letter_count ?? 0),
     pendingLeaveApprovalCount: Number(
       src.pendingLeaveApprovalCount ?? src.pending_leave_approval_count ?? 0,
@@ -533,6 +600,39 @@ export const api = {
   async getTimeDocLogs(limit = 30): Promise<ApiResponse<TimeDocLogsData>> {
     const json = await postStore('employee/time-doc-logs', { limit: String(limit) });
     return { status: json?.status ?? 'error', message: json?.message ?? '', data: json?.data ?? null };
+  },
+
+  /** My roster (weekly off + WFH) — api/mobile.php?action=employee/roster. */
+  async getRoster(opts?: { year?: number; month?: number }): Promise<ApiResponse<RosterData>> {
+    if (USE_DUMMY) {
+      await wait(MOCK_LATENCY_MS);
+      const today = defaultRosterDay(0);
+      const tomorrow = { ...defaultRosterDay(1), status: 'off' as const, statusLabel: 'Weekly Off' };
+      return {
+        status: 'success',
+        message: 'OK',
+        data: {
+          year: opts?.year ?? new Date().getFullYear(),
+          month: opts?.month ?? new Date().getMonth() + 1,
+          monthLabel: new Date().toLocaleDateString(undefined, { month: 'short', year: 'numeric' }),
+          startDate: today.date,
+          endDate: tomorrow.date,
+          today,
+          tomorrow,
+          days: [today, tomorrow],
+        },
+      };
+    }
+    const fields: Record<string, string> = {};
+    if (opts?.year != null) fields.year = String(opts.year);
+    if (opts?.month != null) fields.month = String(opts.month);
+    const json = await postStore('employee/roster', fields);
+    const data = normalizeRosterData(json?.data ?? json);
+    return {
+      status: json?.status === 'success' && data ? 'success' : 'error',
+      message: json?.message ?? (data ? 'OK' : 'Could not load roster.'),
+      data,
+    };
   },
 
   /** Documents + assigned policies — api/mobile.php?action=employee/documents. */
@@ -875,19 +975,47 @@ export const api = {
   /** HR send review — probation/approvals/send */
   async sendProbationReview(input: {
     employeeId: number;
-    approverId?: number;
+    approverId: number;
     notes?: string;
   }): Promise<ApiResponse<{ id: string } | null>> {
     const payload: Record<string, string> = {
       employee_id: String(input.employeeId),
+      approver_id: String(input.approverId),
     };
-    if (input.approverId) payload.approver_id = String(input.approverId);
     if (input.notes) payload.notes = input.notes;
     const json = await postStore('probation/approvals/send', payload);
     return {
       status: json?.status === 'success' ? 'success' : 'error',
       message: json?.message ?? 'Could not send probation review.',
       data: json?.status === 'success' ? { id: String(json.data?.id ?? '') } : null,
+    };
+  },
+
+  /** HR approval authority candidates — probation/approvals/approvers */
+  async getProbationApprovers(input?: {
+    q?: string;
+    excludeEmployeeId?: number;
+    limit?: number;
+  }): Promise<ApiResponse<{ total: number; items: ProbationApproverOption[] }>> {
+    const payload: Record<string, string> = {};
+    if (input?.q) payload.q = input.q;
+    if (input?.excludeEmployeeId) payload.exclude_employee_id = String(input.excludeEmployeeId);
+    if (input?.limit) payload.limit = String(input.limit);
+    const json = await postStore('probation/approvals/approvers', payload);
+    const itemsRaw = Array.isArray(json?.data?.items) ? json.data.items : [];
+    const items: ProbationApproverOption[] = itemsRaw.map((row: any) => ({
+      employeeId: Number(row.employeeId ?? row.employee_id ?? 0),
+      employeeName: String(row.employeeName ?? row.employee_name ?? ''),
+      employeeCode: String(row.employeeCode ?? row.employee_code ?? ''),
+      countryId: Number(row.countryId ?? row.country_id ?? 0),
+      countryName: String(row.countryName ?? row.country_name ?? ''),
+    }));
+    return {
+      status: json?.status === 'success' ? 'success' : 'error',
+      message: json?.message ?? '',
+      data: json?.status === 'success'
+        ? { total: Number(json.data?.total ?? items.length), items }
+        : null,
     };
   },
 

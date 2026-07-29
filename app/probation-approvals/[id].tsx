@@ -131,7 +131,7 @@ export default function ProbationApprovalDetailScreen() {
     if (!detail) return;
     const ok = await confirmAction(
       'Apply to profile',
-      `Apply manager decision for ${detail.employeeName}? This updates status/salary or probation date.`,
+      `Apply approval authority decision for ${detail.employeeName}? This updates status/salary or probation date.`,
       'Apply',
     );
     if (!ok) return;
@@ -199,7 +199,7 @@ export default function ProbationApprovalDetailScreen() {
                 <Badge label={detail.statusLabel} tone={statusTone(detail.status)} />
               </View>
               <Text style={styles.meta}>Complete {formatDate(detail.probationCompleteDate) || '—'}</Text>
-              <Text style={styles.meta}>Manager {detail.managerName || '—'}</Text>
+              <Text style={styles.meta}>Authority {detail.managerName || '—'}</Text>
               <Text style={styles.meta}>Requested {formatTimeDayMonthYear(detail.requestedAt) || '—'}</Text>
               {detail.decisionLabel ? (
                 <Text style={styles.decision}>Decision: {detail.decisionLabel}</Text>
@@ -213,7 +213,7 @@ export default function ProbationApprovalDetailScreen() {
 
             {detail.managerRemarks ? (
               <>
-                <SectionHeader title="Manager remarks" tight />
+                <SectionHeader title="Authority remarks" tight />
                 <Card padded>
                   <Text style={styles.notes}>{detail.managerRemarks}</Text>
                 </Card>

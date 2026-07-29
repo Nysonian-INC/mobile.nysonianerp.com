@@ -294,6 +294,8 @@ export type DashboardData = {
   pendingPolicies: PolicyAck[];
   missingFields: string[];
   logs: ActivityLog[];
+  /** Today + tomorrow roster status (weekly off / WFH / working). */
+  roster: RosterPreview;
   /** Pending offer letters the current user can approve (0 when not an approver). */
   pendingOfferLetterCount: number;
   /** Pending team leave requests the current user can approve (0 when no access). */
@@ -318,6 +320,33 @@ export type DashboardData = {
     /** True when the user has the web IT dashboard (`it_dashboard`) permission. */
     itDashboard: boolean;
   };
+};
+
+/** Single calendar day from employee roster (weekly off / WFH / working). */
+export type RosterDayStatus = 'working' | 'off' | 'wfh';
+
+export type RosterDay = {
+  date: string;
+  label: string;
+  weekday: number;
+  weekdayLabel: string;
+  status: RosterDayStatus;
+  statusLabel: string;
+  inMonth?: boolean;
+};
+
+export type RosterPreview = {
+  today: RosterDay;
+  tomorrow: RosterDay;
+};
+
+export type RosterData = RosterPreview & {
+  year: number;
+  month: number;
+  monthLabel: string;
+  startDate: string;
+  endDate: string;
+  days: RosterDay[];
 };
 
 /** Probation review item (manager decide / HR apply). */
@@ -371,6 +400,15 @@ export type ProbationDueItem = {
   currentSalary?: number | string | null;
   currency: string;
   canSend: boolean;
+};
+
+/** Candidate approval authority for sending a probation review. */
+export type ProbationApproverOption = {
+  employeeId: number;
+  employeeName: string;
+  employeeCode: string;
+  countryId: number;
+  countryName: string;
 };
 
 /* ----------------------------- Profile ----------------------------- */

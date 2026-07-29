@@ -33,6 +33,7 @@ export default function ProfileScreen() {
     () =>
       [
         { icon: 'person-outline' as const, label: 'Personal information', route: '/profile-personal-info' },
+        { icon: 'calendar-outline' as const, label: 'Roster', route: '/roster' },
         { icon: 'git-network-outline' as const, label: 'Organogram', route: '/organogram' },
         { icon: 'document-text-outline' as const, label: 'Documents & policies', route: '/profile-documents' },
         { icon: 'hardware-chip-outline' as const, label: 'My IT assets', route: '/assets' },

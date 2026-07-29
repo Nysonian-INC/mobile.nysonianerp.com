@@ -59,6 +59,7 @@ export default function RootLayout() {
               <Stack.Screen name="profile-payslips" options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="profile-notifications" options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="profile-help-support" options={{ animation: 'slide_from_right' }} />
+              <Stack.Screen name="roster" options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="organogram" options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="employees/search" options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="employees/[employeeKey]" options={{ animation: 'slide_from_right' }} />

@@ -25,7 +25,7 @@ import { useDashboard } from '@/hooks/useDashboard';
 import { formatTenure } from '@/lib/format';
 import { GRADIENT_BR, GRADIENT_TL } from '@/theme/gradients';
 import { palette, radius, spacing, typography } from '@/theme';
-import { ActivityLog } from '@/types';
+import { ActivityLog, RosterDay } from '@/types';
 
 const LOG_ICON: Record<ActivityLog['type'], keyof typeof Ionicons.glyphMap> = {
   attendance: 'time-outline',
@@ -35,6 +35,35 @@ const LOG_ICON: Record<ActivityLog['type'], keyof typeof Ionicons.glyphMap> = {
   asset: 'hardware-chip-outline',
   system: 'cog-outline',
 };
+
+function rosterTone(status?: string) {
+  const s = String(status || '').toLowerCase();
+  if (s === 'off') {
+    return { bg: palette.dangerLight, fg: palette.dangerDark, icon: 'moon-outline' as const };
+  }
+  if (s === 'wfh') {
+    return { bg: palette.infoLight, fg: palette.infoDark, icon: 'home-outline' as const };
+  }
+  return { bg: palette.successLight, fg: palette.successDark, icon: 'briefcase-outline' as const };
+}
+
+function RosterDayChip({ eyebrow, day }: { eyebrow: string; day?: RosterDay }) {
+  const tone = rosterTone(day?.status);
+  return (
+    <View style={[styles.rosterDay, { backgroundColor: tone.bg }]}>
+      <View style={styles.rosterDayTop}>
+        <Text style={[styles.rosterEyebrow, { color: tone.fg }]}>{eyebrow}</Text>
+        <Ionicons name={tone.icon} size={14} color={tone.fg} />
+      </View>
+      <Text style={styles.rosterDate} numberOfLines={1}>
+        {day?.label || '—'}
+      </Text>
+      <Text style={[styles.rosterStatus, { color: tone.fg }]} numberOfLines={1}>
+        {day?.statusLabel || 'Working'}
+      </Text>
+    </View>
+  );
+}
 
 function relativeDate(iso: string) {
   const d = new Date(iso);
@@ -258,6 +287,7 @@ export default function DashboardScreen() {
     pendingProbationDueCount,
     pendingProbationApplyCount,
     logs,
+    roster,
   } = data;
 
   const unit = employee.leaveUnitLabel || 'Days';
@@ -416,6 +446,28 @@ export default function DashboardScreen() {
             </Card>
           </Pressable>
         ) : null}
+
+        {/* Roster — today & tomorrow */}
+        <Pressable onPress={() => router.push('/roster' as never)}>
+          <Card style={styles.rosterCard} padded>
+            <View style={styles.rosterHead}>
+              <View style={styles.rosterHeadLeft}>
+                <View style={styles.rosterIcon}>
+                  <Ionicons name="calendar-outline" size={16} color={palette.primary} />
+                </View>
+                <Text style={styles.rosterTitle}>Roster</Text>
+              </View>
+              <View style={styles.rosterLink}>
+                <Text style={styles.rosterLinkText}>Full schedule</Text>
+                <Ionicons name="chevron-forward" size={16} color={palette.primary} />
+              </View>
+            </View>
+            <View style={styles.rosterDays}>
+              <RosterDayChip eyebrow="Today" day={roster?.today} />
+              <RosterDayChip eyebrow="Tomorrow" day={roster?.tomorrow} />
+            </View>
+          </Card>
+        </Pressable>
 
         {/* HERO: Leave balance — the one focal point of the screen */}
         <Card style={styles.hero} raised padded>
@@ -595,6 +647,37 @@ const styles = StyleSheet.create({
   alertIcon: { width: 38, height: 38, borderRadius: radius.md, backgroundColor: 'rgba(247,144,9,0.16)', alignItems: 'center', justifyContent: 'center' },
   alertTitle: { ...typography.bodyBold, color: palette.text },
   alertSub: { ...typography.small, color: palette.warningDark, marginTop: 2 },
+
+  rosterCard: { marginBottom: spacing.md },
+  rosterHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  rosterHeadLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  rosterIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: radius.sm,
+    backgroundColor: palette.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rosterTitle: { ...typography.bodyBold, color: palette.text },
+  rosterLink: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  rosterLinkText: { ...typography.small, color: palette.primary },
+  rosterDays: { flexDirection: 'row', gap: spacing.sm },
+  rosterDay: {
+    flex: 1,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    gap: 4,
+  },
+  rosterDayTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  rosterEyebrow: { ...typography.caption, textTransform: 'uppercase' },
+  rosterDate: { ...typography.bodyBold, color: palette.text },
+  rosterStatus: { ...typography.small },
 
   actionBannerPress: {
     marginBottom: spacing.md,

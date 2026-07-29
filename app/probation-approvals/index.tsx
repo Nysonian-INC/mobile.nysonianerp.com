@@ -1,15 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Modal,
   Pressable,
   RefreshControl,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,10 +22,9 @@ import ScreenHeader from '@/components/ScreenHeader';
 import SegmentedControl from '@/components/SegmentedControl';
 import StateView from '@/components/StateView';
 import { useDashboard } from '@/hooks/useDashboard';
-import { confirmAction } from '@/lib/confirm';
 import { formatDate } from '@/lib/format';
 import { fonts, numeric, palette, radius, shadow, spacing, typography } from '@/theme';
-import { ProbationDueItem, ProbationReviewItem } from '@/types';
+import { ProbationApproverOption, ProbationDueItem, ProbationReviewItem } from '@/types';
 
 type TabKey = 'due' | 'pending' | 'apply' | 'completed';
 
@@ -36,7 +37,10 @@ function closeScreen() {
 }
 
 function urgencyTone(days: number): { bg: string; fg: string; label: string } {
-  if (days <= 0) {
+  if (days < 0) {
+    return { bg: palette.dangerLight, fg: palette.dangerDark, label: `Overdue ${Math.abs(days)}d` };
+  }
+  if (days === 0) {
     return { bg: palette.dangerLight, fg: palette.dangerDark, label: 'Today' };
   }
   if (days <= 3) {
@@ -46,10 +50,10 @@ function urgencyTone(days: number): { bg: string; fg: string; label: string } {
 }
 
 function tabHint(tab: TabKey, isHr: boolean): string {
-  if (tab === 'due') return 'Send Clear / Extend requests to line managers.';
-  if (tab === 'apply') return 'Manager decided — apply the outcome to the profile.';
+  if (tab === 'due') return 'Send Clear / Extend requests to a selected approval authority.';
+  if (tab === 'apply') return 'Authority decided — apply the outcome to the profile.';
   if (tab === 'completed') return 'Finished reviews for your records.';
-  return isHr ? 'Waiting on line manager decisions.' : 'Choose Clear or Extend for your reports.';
+  return isHr ? 'Waiting on approval authority decisions.' : 'Choose Clear or Extend for assigned reviews.';
 }
 
 function DueCard({
@@ -62,7 +66,7 @@ function DueCard({
   onSend: () => void;
 }) {
   const urgency = urgencyTone(item.daysRemaining);
-  const disabled = sending || !item.canSend;
+  const disabled = sending;
 
   return (
     <View style={styles.card}>
@@ -94,7 +98,7 @@ function DueCard({
         <View style={styles.metaRow}>
           <Ionicons name="person-outline" size={15} color={palette.textMuted} />
           <Text style={styles.metaText} numberOfLines={1}>
-            {item.managerName || 'No line manager assigned'}
+            Line mgr: {item.managerName || 'Not assigned'}
           </Text>
         </View>
       </View>
@@ -103,7 +107,7 @@ function DueCard({
         onPress={onSend}
         disabled={disabled}
         accessibilityRole="button"
-        accessibilityLabel={item.canSend ? `Send ${item.employeeName} to manager` : 'No manager'}
+        accessibilityLabel={`Send ${item.employeeName} for decision`}
         style={({ pressed }) => [
           styles.sendBtn,
           disabled && styles.sendBtnDisabled,
@@ -114,14 +118,8 @@ function DueCard({
           <ActivityIndicator color={palette.white} />
         ) : (
           <>
-            <Ionicons
-              name={item.canSend ? 'send-outline' : 'alert-circle-outline'}
-              size={16}
-              color={palette.white}
-            />
-            <Text style={styles.sendText}>
-              {item.canSend ? 'Send to manager' : 'Assign manager first'}
-            </Text>
+            <Ionicons name="send-outline" size={16} color={palette.white} />
+            <Text style={styles.sendText}>Send for decision</Text>
           </>
         )}
       </Pressable>
@@ -225,6 +223,11 @@ export default function ProbationApprovalsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sendingId, setSendingId] = useState<number | null>(null);
+  const [sendTarget, setSendTarget] = useState<ProbationDueItem | null>(null);
+  const [approvers, setApprovers] = useState<ProbationApproverOption[]>([]);
+  const [approverQuery, setApproverQuery] = useState('');
+  const [approversLoading, setApproversLoading] = useState(false);
+  const [selectedApproverId, setSelectedApproverId] = useState<number | null>(null);
   const requestId = useRef(0);
   const tabRef = useRef(tab);
   tabRef.current = tab;
@@ -299,6 +302,34 @@ export default function ProbationApprovalsScreen() {
     }, [allowed, load]),
   );
 
+  const loadApprovers = useCallback(async (employeeId: number, q = '') => {
+    setApproversLoading(true);
+    try {
+      const res = await api.getProbationApprovers({
+        q: q.trim() || undefined,
+        excludeEmployeeId: employeeId,
+        limit: 50,
+      });
+      if (res.status === 'success' && res.data) {
+        setApprovers(res.data.items);
+      } else {
+        setApprovers([]);
+      }
+    } catch {
+      setApprovers([]);
+    } finally {
+      setApproversLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!sendTarget) return;
+    const timer = setTimeout(() => {
+      loadApprovers(sendTarget.employeeId, approverQuery);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [sendTarget, approverQuery, loadApprovers]);
+
   const onRefresh = async () => {
     setRefreshing(true);
     await load(tab, true);
@@ -309,22 +340,42 @@ export default function ProbationApprovalsScreen() {
     }
   };
 
-  const onSend = async (item: ProbationDueItem) => {
-    if (!item.canSend) {
-      Alert.alert('No manager', 'Assign a line manager on the employee profile first.');
+  const openSend = (item: ProbationDueItem) => {
+    setSendTarget(item);
+    setApproverQuery('');
+    setSelectedApproverId(item.managerId > 0 ? item.managerId : null);
+    setApprovers([]);
+  };
+
+  const closeSend = () => {
+    if (sendingId) return;
+    setSendTarget(null);
+    setSelectedApproverId(null);
+    setApproverQuery('');
+    setApprovers([]);
+  };
+
+  const confirmSend = async () => {
+    if (!sendTarget) return;
+    if (!selectedApproverId) {
+      Alert.alert('Select authority', 'Choose one approval authority before sending.');
       return;
     }
-    const ok = await confirmAction(
-      'Send to manager',
-      `Send probation review for ${item.employeeName} to ${item.managerName || 'their line manager'}?`,
-      'Send',
-    );
-    if (!ok) return;
-    setSendingId(item.employeeId);
+    const authority = approvers.find((a) => a.employeeId === selectedApproverId);
+    const authorityName =
+      authority?.employeeName ||
+      (selectedApproverId === sendTarget.managerId ? sendTarget.managerName : `Employee #${selectedApproverId}`);
+
+    setSendingId(sendTarget.employeeId);
     try {
-      const res = await api.sendProbationReview({ employeeId: item.employeeId });
+      const res = await api.sendProbationReview({
+        employeeId: sendTarget.employeeId,
+        approverId: selectedApproverId,
+      });
       if (res.status === 'success') {
-        Alert.alert('Sent', res.message || 'Probation review sent to line manager.');
+        Alert.alert('Sent', res.message || `Probation review sent to ${authorityName}.`);
+        setSendTarget(null);
+        setSelectedApproverId(null);
         await load('due', true);
         try {
           await refreshDashboard();
@@ -356,6 +407,17 @@ export default function ProbationApprovalsScreen() {
       : 'Pull to refresh, or check another tab.';
 
   const listCount = tab === 'due' ? dueItems.length : reviews.length;
+  const selectedApprover =
+    approvers.find((a) => a.employeeId === selectedApproverId) ||
+    (sendTarget && selectedApproverId === sendTarget.managerId
+      ? {
+          employeeId: sendTarget.managerId,
+          employeeName: sendTarget.managerName || `Employee #${sendTarget.managerId}`,
+          employeeCode: '',
+          countryId: 0,
+          countryName: '',
+        }
+      : null);
 
   return (
     <View style={[styles.root, { paddingBottom: insets.bottom }]}>
@@ -415,7 +477,7 @@ export default function ProbationApprovalsScreen() {
             <DueCard
               item={item}
               sending={sendingId === item.employeeId}
-              onSend={() => onSend(item)}
+              onSend={() => openSend(item)}
             />
           )}
         />
@@ -433,6 +495,103 @@ export default function ProbationApprovalsScreen() {
           renderItem={({ item }) => <ReviewCard item={item} />}
         />
       )}
+
+      <Modal
+        visible={!!sendTarget}
+        transparent
+        animationType="slide"
+        onRequestClose={closeSend}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitle}>Approval authority</Text>
+                <Text style={styles.modalSubtitle} numberOfLines={2}>
+                  Who should decide Clear / Extend for {sendTarget?.employeeName || 'this employee'}?
+                </Text>
+              </View>
+              <Pressable onPress={closeSend} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close">
+                <Ionicons name="close" size={22} color={palette.text} />
+              </Pressable>
+            </View>
+
+            <View style={styles.searchWrap}>
+              <Ionicons name="search" size={16} color={palette.textMuted} />
+              <TextInput
+                value={approverQuery}
+                onChangeText={setApproverQuery}
+                placeholder="Search name or code"
+                placeholderTextColor={palette.textFaint}
+                style={styles.searchInput}
+                autoCorrect={false}
+                autoCapitalize="none"
+              />
+            </View>
+
+            {selectedApprover ? (
+              <Text style={styles.selectedHint}>
+                Selected: {selectedApprover.employeeName}
+                {selectedApprover.employeeCode ? ` (${selectedApprover.employeeCode})` : ''}
+              </Text>
+            ) : (
+              <Text style={styles.selectedHint}>Select one approval authority below.</Text>
+            )}
+
+            {approversLoading ? (
+              <View style={styles.modalCenter}>
+                <ActivityIndicator color={palette.primary} />
+              </View>
+            ) : (
+              <FlatList
+                data={approvers}
+                keyExtractor={(item) => String(item.employeeId)}
+                style={styles.approverList}
+                keyboardShouldPersistTaps="handled"
+                ListEmptyComponent={
+                  <Text style={styles.emptyApprovers}>No matching employees with login access.</Text>
+                }
+                renderItem={({ item }) => {
+                  const active = item.employeeId === selectedApproverId;
+                  return (
+                    <Pressable
+                      onPress={() => setSelectedApproverId(item.employeeId)}
+                      style={[styles.approverRow, active && styles.approverRowActive]}
+                    >
+                      <InitialsAvatar name={item.employeeName} size={36} />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.approverName} numberOfLines={1}>
+                          {item.employeeName}
+                        </Text>
+                        <Text style={styles.approverMeta} numberOfLines={1}>
+                          {[item.employeeCode, item.countryName].filter(Boolean).join(' · ') || '—'}
+                        </Text>
+                      </View>
+                      {active ? <Ionicons name="checkmark-circle" size={20} color={palette.primary} /> : null}
+                    </Pressable>
+                  );
+                }}
+              />
+            )}
+
+            <Pressable
+              onPress={confirmSend}
+              disabled={!selectedApproverId || !!sendingId}
+              style={({ pressed }) => [
+                styles.confirmSendBtn,
+                (!selectedApproverId || !!sendingId) && styles.sendBtnDisabled,
+                pressed && selectedApproverId && !sendingId && { opacity: 0.9 },
+              ]}
+            >
+              {sendingId ? (
+                <ActivityIndicator color={palette.white} />
+              ) : (
+                <Text style={styles.sendText}>Send for decision</Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -569,5 +728,100 @@ const styles = StyleSheet.create({
   actionChipText: {
     ...typography.small,
     fontFamily: fonts.bold,
+  },
+
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    backgroundColor: palette.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    maxHeight: '88%',
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    gap: spacing.md,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+  },
+  modalTitle: {
+    ...typography.h3,
+    color: palette.text,
+  },
+  modalSubtitle: {
+    ...typography.small,
+    color: palette.textMuted,
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  searchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: palette.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    minHeight: 44,
+    backgroundColor: palette.background,
+  },
+  searchInput: {
+    flex: 1,
+    ...typography.body,
+    color: palette.text,
+    paddingVertical: spacing.sm,
+  },
+  selectedHint: {
+    ...typography.caption,
+    color: palette.textMuted,
+  },
+  modalCenter: {
+    minHeight: 160,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  approverList: {
+    maxHeight: 320,
+  },
+  emptyApprovers: {
+    ...typography.small,
+    color: palette.textMuted,
+    textAlign: 'center',
+    paddingVertical: spacing.xl,
+  },
+  approverRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: palette.border,
+  },
+  approverRowActive: {
+    backgroundColor: palette.primaryLight,
+    marginHorizontal: -spacing.sm,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.md,
+  },
+  approverName: {
+    ...typography.bodyBold,
+    color: palette.text,
+  },
+  approverMeta: {
+    ...typography.caption,
+    color: palette.textMuted,
+    marginTop: 2,
+  },
+  confirmSendBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+    backgroundColor: palette.info,
+    borderRadius: radius.md,
   },
 });
