@@ -36,7 +36,7 @@
   "submit": {
     "production": {
       "ios": {
-        "ascAppId": "REPLACE_WITH_APP_STORE_CONNECT_APP_ID"
+        "ascAppId": "6785603848"
       },
       "android": {
         "track": "internal",
@@ -45,7 +45,7 @@
     },
     "testflight": {
       "ios": {
-        "ascAppId": "REPLACE_WITH_APP_STORE_CONNECT_APP_ID"
+        "ascAppId": "6785603848"
       },
       "android": {
         "track": "internal",
