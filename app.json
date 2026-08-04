@@ -14,7 +14,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.nysonian.erpmobile",
+      "bundleIdentifier": "com.nysonian.nysonikerp",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -24,11 +24,7 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0A0E27"
-      },
-      "permissions": [
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
-      ]
+      }
     },
     "web": {
       "bundler": "metro",
@@ -43,8 +39,7 @@
           "fonts": []
         }
       ],
-      "expo-secure-store",
-      "expo-av"
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true
@@ -54,8 +49,9 @@
         "origin": false
       },
       "eas": {
-        "projectId": "a88aadcd-43f8-4586-8e69-350f6563cf84"
+        "projectId": "d7e3d8c1-b3b0-45f2-97a4-3d94a6f6893e"
       }
-    }
+    },
+    "owner": "nysonianapps"
   }
 }
